@@ -1,16 +1,14 @@
 {
   "compilerOptions": {
     "target": "ES2020",
-    "module": "ES2020",
+    "module": "ESNext",
     "moduleResolution": "bundler",
+    "lib": ["ES2020", "DOM"],
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "outDir": ".",
-    "rootDir": ".",
-    "lib": ["ES2020", "DOM", "DOM.Iterable"]
+    "outDir": "./dist",
+    "rootDir": "./src"
   },
-  "include": ["editor.ts", "background.ts"],
-  "exclude": ["node_modules", "icons"]
+  "include": ["src/**/*"]
 }
