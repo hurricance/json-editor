@@ -53,14 +53,42 @@
     }
 
     .panel {
-      flex: 1;
+      flex: 1 1 0;
       display: flex;
       flex-direction: column;
       min-width: 0;
+      overflow: hidden;
     }
 
-    .panel:first-child {
-      border-right: 1px solid #0f3460;
+    .divider {
+      width: 4px;
+      flex-shrink: 0;
+      background: #0f3460;
+      cursor: col-resize;
+      transition: background 0.15s;
+      position: relative;
+    }
+
+    .divider:hover,
+    .divider.active {
+      background: #e94560;
+    }
+
+    .divider::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 2px;
+      height: 32px;
+      border-radius: 1px;
+      background: #ffffff33;
+    }
+
+    .divider:hover::after,
+    .divider.active::after {
+      background: #ffffff66;
     }
 
     .panel-header {
@@ -97,79 +125,12 @@
 
     .editor-body {
       flex: 1;
-      display: flex;
       overflow: hidden;
       min-height: 0;
     }
 
-    .line-numbers {
-      flex-shrink: 0;
-      overflow: hidden;
-      padding: 16px 0;
-      background: #16162a;
-      border-right: 1px solid #0f3460;
-      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', Menlo, Monaco, monospace;
-      font-size: 13px;
-      line-height: 1.6;
-      text-align: right;
-      user-select: none;
-      min-width: 44px;
-    }
-
-    .line-numbers span {
-      display: block;
-      padding-right: 10px;
-      padding-left: 6px;
-      color: #555;
-      min-height: 20.8px; /* 13px * 1.6 */
-    }
-
-    textarea {
-      flex: 1;
-      border: none;
-      outline: none;
-      resize: none;
-      padding: 16px;
-      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', Menlo, Monaco, monospace;
-      font-size: 13px;
-      line-height: 1.6;
-      background: #1a1a2e;
-      color: #e0e0e0;
-      tab-size: 2;
-      overflow: auto;
-      white-space: pre;
-      overflow-wrap: normal;
-    }
-
-    textarea::placeholder {
-      color: #555;
-    }
-
-    textarea:focus {
-      background: #1e1e36;
-    }
-
-    /* Scrollbar */
-    textarea::-webkit-scrollbar,
-    .line-numbers::-webkit-scrollbar {
-      width: 8px;
-    }
-
-    .line-numbers::-webkit-scrollbar {
-      width: 0;
-    }
-
-    textarea::-webkit-scrollbar-track {
-      background: transparent;
-    }
-
-    textarea::-webkit-scrollbar-thumb {
-      background: #333;
-      border-radius: 4px;
-    }
-
-    textarea::-webkit-scrollbar-thumb:hover {
-      background: #555;
+    .editor-body .cm-editor {
+      height: 100%;
     }
   </style>
 </head>
@@ -179,25 +140,20 @@
     <span>Left: raw input &mdash; Right: formatted output (editable, syncs back)</span>
   </header>
   <main>
-    <div class="panel">
+    <div class="panel" id="left-panel">
       <div class="panel-header">
         <h2>Input</h2>
         <span class="status" id="left-status"></span>
       </div>
-      <div class="editor-body">
-        <div class="line-numbers" id="left-linenums"></div>
-        <textarea id="left-editor" placeholder='Paste JSON here, e.g. {"name":"test","data":"{\"key\":\"value\"}"}' spellcheck="false" wrap="off"></textarea>
-      </div>
+      <div class="editor-body" id="left-editor"></div>
     </div>
-    <div class="panel">
+    <div class="divider" id="divider"></div>
+    <div class="panel" id="right-panel">
       <div class="panel-header">
         <h2>Formatted</h2>
         <span class="status" id="right-status"></span>
       </div>
-      <div class="editor-body">
-        <div class="line-numbers" id="right-linenums"></div>
-        <textarea id="right-editor" placeholder="Formatted JSON will appear here..." spellcheck="false" wrap="off"></textarea>
-      </div>
+      <div class="editor-body" id="right-editor"></div>
     </div>
   </main>
   <script src="dist/editor.js"></script>
