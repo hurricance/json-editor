@@ -1,0 +1,13 @@
+{
+  "name": "chrome-json-editor",
+  "version": "1.0.0",
+  "description": "Chrome extension: two-panel JSON editor with recursive formatting",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.40",
+    "typescript": "^5.4.0"
+  }
+}
