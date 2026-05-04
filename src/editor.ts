@@ -124,7 +124,21 @@ function getDoc(ed: EditorView): string {
 
 function setDoc(ed: EditorView, text: string): void {
   if (getDoc(ed) === text) return;
-  ed.dispatch({ changes: { from: 0, to: ed.state.doc.length, insert: text } });
+  // Replace only the changed middle section so the cursor is mapped
+  // through the change rather than being reset to 0.
+  const cur = getDoc(ed);
+  let p = 0;
+  while (p < cur.length && p < text.length && cur[p] === text[p]) p++;
+  let s = 0;
+  const maxS = Math.min(cur.length - p, text.length - p);
+  while (s < maxS && cur[cur.length - 1 - s] === text[text.length - 1 - s]) s++;
+  ed.dispatch({
+    changes: {
+      from: p,
+      to: cur.length - s,
+      insert: text.slice(p, text.length - s),
+    },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -148,19 +162,25 @@ function updateStatus(el: HTMLElement, text: string, cls: string): void {
   el.className = `status ${cls}`;
 }
 
-function formatJSON(raw: string): string {
-  return JSON.stringify(JSON.parse(raw), null, 2);
-}
-
 // ---------------------------------------------------------------------------
 // Sync
 // ---------------------------------------------------------------------------
 
+function tryFormatLeft(): void {
+  const raw = getDoc(leftEditor);
+  if (!raw.trim()) return;
+  try {
+    const formatted = JSON.stringify(JSON.parse(raw), null, 2);
+    if (getDoc(leftEditor) !== formatted) {
+      suppressLeft = true;
+      setDoc(leftEditor, formatted);
+    }
+  } catch { /* not valid JSON yet */ }
+}
+
 function syncLeftToRight(): void {
   const raw = getDoc(leftEditor).trim();
   if (!raw) {
-    suppressLeft = true;
-    setDoc(leftEditor, '');
     suppressRight = true;
     setDoc(rightEditor, '');
     jsonStringPaths = [];
@@ -169,18 +189,10 @@ function syncLeftToRight(): void {
   }
   try {
     const parsed = JSON.parse(raw);
-    const formatted = JSON.stringify(parsed, null, 2);
     jsonStringPaths = collectJsonStringPaths(parsed);
     const expanded = deepParse(parsed);
-
-    // Format left panel
-    suppressLeft = true;
-    setDoc(leftEditor, formatted);
-
-    // Expand right panel
     suppressRight = true;
     setDoc(rightEditor, JSON.stringify(expanded, null, 2));
-
     updateStatus(rightStatus, 'Valid JSON', 'success');
   } catch (err) {
     updateStatus(rightStatus, (err as Error).message, 'error');
@@ -218,6 +230,9 @@ leftEditor = new EditorView({
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           if (suppressLeft) { suppressLeft = false; return; }
+          // Format left in the same frame if JSON is already valid
+          tryFormatLeft();
+          // Debounce the heavier expand→right sync
           clearTimeout(leftTimer);
           leftTimer = setTimeout(syncLeftToRight, 200);
         }
