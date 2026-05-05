@@ -5,7 +5,8 @@
   "scripts": {
     "build": "esbuild src/background.ts src/editor.ts --bundle --minify --outdir=release/dist --format=iife && cp manifest.json editor.html release/ && cp -r icons release/",
     "typecheck": "tsc --noEmit",
-    "watch": "esbuild src/background.ts src/editor.ts --bundle --outdir=dist --format=iife --watch"
+    "watch": "esbuild src/background.ts src/editor.ts --bundle --outdir=dist --format=iife --watch",
+    "package": "cd release && zip -r ../json-editor.zip ."
   },
   "devDependencies": {
     "@codemirror/autocomplete": "^6.20.1",
