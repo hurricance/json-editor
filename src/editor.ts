@@ -291,6 +291,7 @@ function tryFormatLeft(): void {
 }
 
 function syncLeftToRight(): void {
+  clearTimeout(rightTimer);
   const raw = getDoc(leftEditor).trim();
   if (!raw) {
     setDoc(rightEditor, '');
@@ -310,6 +311,7 @@ function syncLeftToRight(): void {
 }
 
 function syncRightToLeft(): void {
+  clearTimeout(leftTimer);
   const raw = getDoc(rightEditor).trim();
   if (!raw) {
     setDoc(leftEditor, '');
