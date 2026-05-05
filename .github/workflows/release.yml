@@ -13,6 +13,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - uses: actions/checkout@v4
@@ -44,4 +46,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: json-editor-*.zip
-          generate_release_notes: true
+          body: |
+            Chrome extension: two-panel JSON editor with recursive formatting and bidirectional sync.
+          make_latest: true
