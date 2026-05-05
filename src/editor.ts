@@ -4,6 +4,7 @@ import { json } from '@codemirror/lang-json';
 import { codeFolding, foldGutter, foldKeymap, indentOnInput, bracketMatching, syntaxTree } from '@codemirror/language';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
+import { parse as losslessParse, stringify as losslessStringify, isLosslessNumber } from 'lossless-json';
 
 // ---------------------------------------------------------------------------
 // Dark theme
@@ -67,6 +68,47 @@ function foldLabel(state: EditorState, range: { from: number; to: number }): str
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Manual format keybinding — Shift-Alt-F / Ctrl-Shift-I
+// ---------------------------------------------------------------------------
+
+const formatKeymap = keymap.of([
+  // Option-Shift-F on macOS, Alt-Shift-F elsewhere (same as VS Code default)
+  { key: 'Alt-Shift-f', run: formatActive },
+  // Cmd-Option-F on macOS, Ctrl-Alt-F elsewhere
+  { key: 'Mod-Alt-f', run: formatActive },
+]);
+
+function formatActive(view: EditorView): boolean {
+  const oldDoc = view.state.doc.toString();
+  try {
+    const text = losslessStringify(losslessParse(oldDoc), null, 2)!;
+    if (oldDoc === text) return true;
+
+    const pos = view.state.selection.main.head;
+    const oldLine = view.state.doc.lineAt(pos);
+    const col = pos - oldLine.from;
+    let lineStart = 0;
+    for (let i = 1; i < oldLine.number && lineStart < text.length; i++) {
+      const nx = text.indexOf('\n', lineStart);
+      if (nx === -1) break;
+      lineStart = nx + 1;
+    }
+    const lineEnd = text.indexOf('\n', lineStart);
+    const lineLen = (lineEnd === -1 ? text.length : lineEnd) - lineStart;
+    const newPos = lineStart + Math.min(col, lineLen);
+
+    view.dispatch({
+      changes: { from: 0, to: oldDoc.length, insert: text },
+      selection: { anchor: newPos },
+      annotations: syncAnnotation.of(true),
+    });
+  } catch {
+    /* not valid JSON, ignore */
+  }
+  return true;
+}
+
 const editorExtensions = [
   lineNumbers(),
   drawSelection(),
@@ -90,6 +132,7 @@ const editorExtensions = [
   closeBrackets(),
   json(),
   darkTheme,
+  formatKeymap,
   keymap.of([
     ...defaultKeymap,
     ...historyKeymap,
@@ -126,7 +169,7 @@ function expandAndTrack(obj: unknown): {
   function walk(val: unknown, path: string[]): unknown {
     if (typeof val === 'string') {
       try {
-        const inner = JSON.parse(val);
+        const inner = losslessParse(val);
         paths.push([...path]);
         return walk(inner, path);
       } catch {
@@ -136,7 +179,7 @@ function expandAndTrack(obj: unknown): {
     if (Array.isArray(val)) {
       return val.map((item, i) => walk(item, [...path, String(i)]));
     }
-    if (val !== null && typeof val === 'object') {
+    if (val !== null && typeof val === 'object' && !isLosslessNumber(val)) {
       const result: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(val)) {
         result[k] = walk(v, [...path, k]);
@@ -168,11 +211,11 @@ function setAtPath(obj: Record<string, unknown>, path: string[], value: unknown)
 }
 
 function collapseJsonStrings(expanded: unknown, paths: string[][]): unknown {
-  const clone = JSON.parse(JSON.stringify(expanded));
+  const clone = losslessParse(losslessStringify(expanded)!) as Record<string, unknown>;
   for (const p of paths) {
     const val = getAtPath(clone, p);
-    if (val !== undefined && typeof val !== 'string') {
-      setAtPath(clone, p, JSON.stringify(val));
+    if (val !== undefined && typeof val !== 'string' && !isLosslessNumber(val)) {
+      setAtPath(clone, p, losslessStringify(val)!);
     }
   }
   return clone;
@@ -230,8 +273,7 @@ function tryFormatLeft(): void {
   const raw = getDoc(leftEditor).trim();
   if (!raw) return;
   try {
-    const formatted = JSON.stringify(JSON.parse(raw), null, 2);
-    setDoc(leftEditor, formatted);
+    setDoc(leftEditor, losslessStringify(losslessParse(raw), null, 2)!);
   } catch {
     /* not valid JSON yet */
   }
@@ -246,10 +288,10 @@ function syncLeftToRight(): void {
     return;
   }
   try {
-    const parsed = JSON.parse(raw);
+    const parsed = losslessParse(raw);
     const { expanded, paths } = expandAndTrack(parsed);
     jsonStringPaths = paths;
-    setDoc(rightEditor, JSON.stringify(expanded, null, 2));
+    setDoc(rightEditor, losslessStringify(expanded, null, 2)!);
     updateStatus(rightStatus, 'Valid JSON', 'success');
   } catch (err) {
     updateStatus(rightStatus, (err as Error).message, 'error');
@@ -264,9 +306,9 @@ function syncRightToLeft(): void {
     return;
   }
   try {
-    const parsed = JSON.parse(raw);
+    const parsed = losslessParse(raw);
     const collapsed = collapseJsonStrings(parsed, jsonStringPaths);
-    setDoc(leftEditor, JSON.stringify(collapsed, null, 2));
+    setDoc(leftEditor, losslessStringify(collapsed, null, 2)!);
     updateStatus(leftStatus, 'Synced', 'success');
   } catch (err) {
     updateStatus(leftStatus, (err as Error).message, 'error');
