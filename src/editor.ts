@@ -161,15 +161,18 @@ function isSync(update: any): boolean {
 function expandAndTrack(obj: unknown): {
   expanded: unknown;
   paths: string[][];
+  originals: Map<string, string>;
 } {
   const paths: string[][] = [];
+  const originals = new Map<string, string>();
   const expanded = walk(obj, []);
-  return { expanded, paths };
+  return { expanded, paths, originals };
 
   function walk(val: unknown, path: string[]): unknown {
     if (typeof val === 'string') {
       try {
         const inner = losslessParse(val);
+        originals.set(JSON.stringify(path), val);
         paths.push([...path]);
         return walk(inner, path);
       } catch {
@@ -210,7 +213,7 @@ function setAtPath(obj: Record<string, unknown>, path: string[], value: unknown)
   else cur[last] = value;
 }
 
-function collapseJsonStrings(expanded: unknown, paths: string[][]): unknown {
+function collapseJsonStrings(expanded: unknown, paths: string[][], originals: Map<string, string>): unknown {
   // Deepest first so nested JSON strings collapse correctly.
   // Also clone via stringify→parse so isLosslessNumber checks work.
   const clone = losslessParse(losslessStringify(expanded)!) as Record<string, unknown>;
@@ -226,7 +229,15 @@ function collapseJsonStrings(expanded: unknown, paths: string[][]): unknown {
     if (!reachable) continue;
     const val = cur;
     if (typeof val !== 'string' && !isLosslessNumber(val)) {
-      setAtPath(clone, p, losslessStringify(val)!);
+      const newStr = losslessStringify(val)!;
+      const pathKey = JSON.stringify(p);
+      const original = originals.get(pathKey);
+      // Preserve original formatting when the structure matches.
+      if (original && losslessStringify(losslessParse(original)!) === newStr) {
+        setAtPath(clone, p, original);
+      } else {
+        setAtPath(clone, p, newStr);
+      }
     }
   }
   return clone;
@@ -262,6 +273,7 @@ function setDoc(ed: EditorView, text: string): void {
 // ---------------------------------------------------------------------------
 
 let jsonStringPaths: string[][] = [];
+let jsonStringOriginals = new Map<string, string>();
 const leftStatus = document.getElementById('left-status')!;
 const rightStatus = document.getElementById('right-status')!;
 
@@ -296,13 +308,15 @@ function syncLeftToRight(): void {
   if (!raw) {
     setDoc(rightEditor, '');
     jsonStringPaths = [];
+    jsonStringOriginals = new Map<string, string>();
     updateStatus(rightStatus, '', '');
     return;
   }
   try {
     const parsed = losslessParse(raw);
-    const { expanded, paths } = expandAndTrack(parsed);
+    const { expanded, paths, originals } = expandAndTrack(parsed);
     jsonStringPaths = paths;
+    jsonStringOriginals = originals;
     setDoc(rightEditor, losslessStringify(expanded, null, 2)!);
     updateStatus(rightStatus, 'Valid JSON', 'success');
   } catch (err) {
@@ -320,7 +334,7 @@ function syncRightToLeft(): void {
   }
   try {
     const parsed = losslessParse(raw);
-    const collapsed = collapseJsonStrings(parsed, jsonStringPaths);
+    const collapsed = collapseJsonStrings(parsed, jsonStringPaths, jsonStringOriginals);
     setDoc(leftEditor, losslessStringify(collapsed, null, 2)!);
     updateStatus(leftStatus, 'Synced', 'success');
   } catch (err) {
