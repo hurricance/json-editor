@@ -1,7 +1,7 @@
 import { EditorView, lineNumbers, drawSelection, highlightActiveLine, keymap } from '@codemirror/view';
 import { EditorState, Annotation } from '@codemirror/state';
 import { json } from '@codemirror/lang-json';
-import { foldGutter, foldKeymap, indentOnInput, bracketMatching } from '@codemirror/language';
+import { codeFolding, foldGutter, foldKeymap, indentOnInput, bracketMatching, syntaxTree } from '@codemirror/language';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 
@@ -40,11 +40,50 @@ const darkTheme = EditorView.theme(
   { dark: true },
 );
 
+// ---------------------------------------------------------------------------
+// Extensions
+// ---------------------------------------------------------------------------
+
+function foldLabel(state: EditorState, range: { from: number; to: number }): string | null {
+  const tree = syntaxTree(state);
+  const node = tree.resolveInner(range.from + 1, -1);
+  if (!node) return null;
+  if (node.name === 'Array') {
+    let cnt = 0;
+    const cur = node.cursor();
+    if (cur.firstChild()) {
+      do { if (cur.name !== '[' && cur.name !== ']' && cur.name !== ',') cnt++; } while (cur.nextSibling());
+    }
+    return `[... ${cnt}]`;
+  }
+  if (node.name === 'Object') {
+    let cnt = 0;
+    const cur = node.cursor();
+    if (cur.firstChild()) {
+      do { if (cur.name === 'Property') cnt++; } while (cur.nextSibling());
+    }
+    return `{... ${cnt}}`;
+  }
+  return null;
+}
+
 const editorExtensions = [
   lineNumbers(),
   drawSelection(),
   highlightActiveLine(),
   history(),
+  codeFolding({
+    preparePlaceholder(state, range) {
+      return foldLabel(state, range);
+    },
+    placeholderDOM(_view, onclick, prepared: string | null) {
+      const span = document.createElement('span');
+      span.className = 'cm-foldPlaceholder';
+      span.textContent = prepared ?? '…';
+      span.onclick = onclick;
+      return span;
+    },
+  }),
   foldGutter(),
   indentOnInput(),
   bracketMatching(),
