@@ -211,14 +211,15 @@ function setAtPath(obj: Record<string, unknown>, path: string[], value: unknown)
 }
 
 function collapseJsonStrings(expanded: unknown, paths: string[][]): unknown {
-  const clone = losslessParse(losslessStringify(expanded)!) as Record<string, unknown>;
-  for (const p of paths) {
-    const val = getAtPath(clone, p);
+  // Sort deepest first so nested JSON strings collapse correctly.
+  const sorted = [...paths].sort((a, b) => b.length - a.length);
+  for (const p of sorted) {
+    const val = getAtPath(expanded as Record<string, unknown>, p);
     if (val !== undefined && typeof val !== 'string' && !isLosslessNumber(val)) {
-      setAtPath(clone, p, losslessStringify(val)!);
+      setAtPath(expanded as Record<string, unknown>, p, losslessStringify(val)!);
     }
   }
-  return clone;
+  return expanded;
 }
 
 // ---------------------------------------------------------------------------
