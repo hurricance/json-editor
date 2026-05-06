@@ -1,5 +1,5 @@
-import { EditorView, lineNumbers, drawSelection, highlightActiveLine, keymap } from '@codemirror/view';
-import { EditorState, Annotation } from '@codemirror/state';
+import { EditorView, ViewUpdate, lineNumbers, drawSelection, highlightActiveLine, keymap } from '@codemirror/view';
+import { EditorState, Transaction, Annotation } from '@codemirror/state';
 import { json } from '@codemirror/lang-json';
 import { codeFolding, foldGutter, foldKeymap, indentOnInput, bracketMatching, syntaxTree } from '@codemirror/language';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
@@ -149,8 +149,8 @@ const editorExtensions = [
 
 const syncAnnotation = Annotation.define<boolean>();
 
-function isSync(update: any): boolean {
-  return update.transactions.some((tr: any) => tr.annotation(syncAnnotation));
+function isSync(update: ViewUpdate): boolean {
+  return update.transactions.some((tr: Transaction) => tr.annotation(syncAnnotation));
 }
 
 // ---------------------------------------------------------------------------
