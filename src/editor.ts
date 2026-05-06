@@ -292,10 +292,46 @@ function updateStatus(el: HTMLElement, text: string, cls: string): void {
 // Sync
 // ---------------------------------------------------------------------------
 
+function hasDuplicateKeys(raw: string): boolean {
+  const seen = new Map<number, Set<string>>();
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  let key = '';
+
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+
+    if (escape) { key += ch; escape = false; continue; }
+    if (ch === '\\') { key += ch; escape = true; continue; }
+
+    if (ch === '"') {
+      if (!inString) { inString = true; key = '"'; continue; }
+      key += '"';
+      const after = raw.slice(i + 1).trimStart();
+      if (after.startsWith(':')) {
+        if (!seen.has(depth)) seen.set(depth, new Set());
+        if (seen.get(depth)!.has(key)) return true;
+        seen.get(depth)!.add(key);
+      }
+      inString = false;
+      key = '';
+      continue;
+    }
+
+    if (inString) { key += ch; continue; }
+    if (ch === '{') depth++;
+    if (ch === '}') { seen.delete(depth); depth--; }
+  }
+
+  return false;
+}
+
 function tryFormatLeft(): void {
   const raw = getDoc(leftEditor).trim();
   if (!raw) return;
   try {
+    if (hasDuplicateKeys(raw)) return;
     setDoc(leftEditor, losslessStringify(losslessParse(raw), null, 2)!);
   } catch {
     /* not valid JSON yet */
