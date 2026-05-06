@@ -2,6 +2,7 @@
   "name": "chrome-json-editor",
   "version": "1.0.0",
   "description": "Chrome extension: two-panel JSON editor with recursive formatting",
+  "packageManager": "pnpm@9.11.0",
   "scripts": {
     "build": "esbuild src/background.ts src/editor.ts --bundle --minify --outdir=release/dist --format=iife && cp manifest.json editor.html release/ && cp -r icons release/",
     "typecheck": "tsc --noEmit",
