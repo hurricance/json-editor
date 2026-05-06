@@ -331,7 +331,11 @@ function tryFormatLeft(): void {
   const raw = getDoc(leftEditor).trim();
   if (!raw) return;
   try {
-    if (hasDuplicateKeys(raw)) return;
+    if (hasDuplicateKeys(raw)) {
+      updateStatus(leftStatus, 'Duplicate keys detected', 'error');
+      return;
+    }
+    updateStatus(leftStatus, '', '');
     setDoc(leftEditor, losslessStringify(losslessParse(raw), null, 2)!);
   } catch {
     /* not valid JSON yet */
@@ -349,6 +353,9 @@ function syncLeftToRight(): void {
     return;
   }
   try {
+    if (hasDuplicateKeys(raw)) {
+      updateStatus(rightStatus, 'Duplicate keys detected', 'error');
+    }
     const parsed = losslessParse(raw);
     const { expanded, paths, originals } = expandAndTrack(parsed);
     jsonStringPaths = paths;
