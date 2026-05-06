@@ -24,22 +24,22 @@ jobs:
           node-version: '24'
           cache: 'pnpm'
 
-      - run: pnpm install
+      - run: pnpm install --frozen-lockfile
 
       - run: pnpm typecheck
 
       - run: pnpm build
 
       - name: Package
-        run: cd release && zip -r ../json-editor.zip .
+        run: cd release && zip -r ../json-editor-${{ github.ref_name }}.zip .
 
       - uses: actions/upload-artifact@v7
         with:
           name: json-editor
-          path: json-editor.zip
+          path: json-editor-*.zip
 
       - name: Create GitHub Release
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v3
         with:
-          files: json-editor.zip
+          files: json-editor-*.zip
