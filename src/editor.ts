@@ -82,7 +82,9 @@ const formatKeymap = keymap.of([
 function formatActive(view: EditorView): boolean {
   const oldDoc = view.state.doc.toString();
   try {
-    const text = losslessStringify(losslessParse(oldDoc), null, 2)!;
+    const parsed = losslessParse(oldDoc);
+    assertJsonDocumentRoot(parsed);
+    const text = losslessStringify(parsed, null, 2)!;
     if (oldDoc === text) return true;
 
     const pos = view.state.selection.main.head;
@@ -104,7 +106,7 @@ function formatActive(view: EditorView): boolean {
       annotations: syncAnnotation.of(true),
     });
   } catch {
-    /* not valid JSON, ignore */
+    /* not valid JSON document, ignore */
   }
   return true;
 }
@@ -170,13 +172,15 @@ function expandAndTrack(obj: unknown): {
 
   function walk(val: unknown, path: string[]): unknown {
     if (typeof val === 'string') {
+      if (!looksLikeJsonContainerString(val)) return val;
       try {
         const inner = losslessParse(val);
         originals.set(JSON.stringify(path), val);
         paths.push([...path]);
         return walk(inner, path);
-      } catch {
-        return val;
+      } catch (err) {
+        const pathLabel = path.length ? path.join('.') : '<root>';
+        throw new Error(`Invalid embedded JSON at ${pathLabel}: ${(err as Error).message}`);
       }
     }
     if (Array.isArray(val)) {
@@ -193,7 +197,18 @@ function expandAndTrack(obj: unknown): {
   }
 }
 
-function getAtPath(obj: Record<string, unknown>, path: string[]): unknown {
+function looksLikeJsonContainerString(value: string): boolean {
+  const trimmed = value.trim();
+  return trimmed.startsWith('{') || trimmed.startsWith('[');
+}
+
+function assertJsonDocumentRoot(value: unknown): void {
+  if (value === null || typeof value !== 'object' || Array.isArray(value) || isLosslessNumber(value)) {
+    throw new Error('Top-level JSON must be a valid object');
+  }
+}
+
+function pathGet(obj: unknown, path: string[]): unknown {
   let cur: any = obj;
   for (const seg of path) {
     if (cur === null || cur === undefined) return undefined;
@@ -202,7 +217,7 @@ function getAtPath(obj: Record<string, unknown>, path: string[]): unknown {
   return cur;
 }
 
-function setAtPath(obj: Record<string, unknown>, path: string[], value: unknown): void {
+function pathSet(obj: unknown, path: string[], value: unknown): void {
   let cur: any = obj;
   for (let i = 0; i < path.length - 1; i++) {
     const seg = path[i];
@@ -211,6 +226,154 @@ function setAtPath(obj: Record<string, unknown>, path: string[], value: unknown)
   const last = path[path.length - 1];
   if (Array.isArray(cur)) cur[+last] = value;
   else cur[last] = value;
+}
+
+function sameJsonValue(a: unknown, b: unknown): boolean {
+  return losslessStringify(a) === losslessStringify(b);
+}
+
+function collectChangedPaths(before: unknown, after: unknown, path: string[] = []): string[][] {
+  if (sameJsonValue(before, after)) return [];
+
+  if (Array.isArray(before) && Array.isArray(after) && before.length === after.length) {
+    return before.flatMap((item, i) => collectChangedPaths(item, after[i], [...path, String(i)]));
+  }
+
+  if (isJsonObject(before) && isJsonObject(after)) {
+    const beforeKeys = Object.keys(before);
+    const afterKeys = Object.keys(after);
+    if (beforeKeys.length === afterKeys.length && beforeKeys.every((key) => Object.prototype.hasOwnProperty.call(after, key))) {
+      return beforeKeys.flatMap((key) => collectChangedPaths(before[key], after[key], [...path, key]));
+    }
+  }
+
+  return [path];
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) && !isLosslessNumber(value);
+}
+
+function applyChangedPathsToSource(source: string, nextValue: unknown, paths: string[][]): string | null {
+  let result = source;
+  const sorted = [...paths].sort((a, b) => b.length - a.length);
+  for (const path of sorted) {
+    const range = findValueRange(result, path);
+    if (!range) return null;
+    const replacement = losslessStringify(pathGet(nextValue, path))!;
+    result = result.slice(0, range.start) + replacement + result.slice(range.end);
+  }
+  return result;
+}
+
+function findValueRange(source: string, path: string[]): { start: number; end: number } | null {
+  let start = skipWhitespace(source, 0);
+  let end = findValueEnd(source, start);
+  if (end === -1) return null;
+
+  for (let i = 0; i < path.length; i++) {
+    const segment = path[i];
+    const found = source[start] === '{'
+      ? findObjectMemberValue(source, start, end, segment)
+      : source[start] === '['
+        ? findArrayItemValue(source, start, end, Number(segment))
+        : null;
+    if (!found) return null;
+    start = found.start;
+    end = found.end;
+  }
+
+  return { start, end };
+}
+
+function findObjectMemberValue(source: string, objectStart: number, objectEnd: number, key: string): { start: number; end: number } | null {
+  let pos = skipWhitespace(source, objectStart + 1);
+  while (pos < objectEnd && source[pos] !== '}') {
+    if (source[pos] !== '"') return null;
+    const keyEnd = findStringEnd(source, pos);
+    if (keyEnd === -1) return null;
+    const parsedKey = JSON.parse(source.slice(pos, keyEnd));
+    pos = skipWhitespace(source, keyEnd);
+    if (source[pos] !== ':') return null;
+    const valueStart = skipWhitespace(source, pos + 1);
+    const valueEnd = findValueEnd(source, valueStart);
+    if (valueEnd === -1) return null;
+    if (parsedKey === key) return { start: valueStart, end: valueEnd };
+    pos = skipWhitespace(source, valueEnd);
+    if (source[pos] === ',') pos = skipWhitespace(source, pos + 1);
+  }
+  return null;
+}
+
+function findArrayItemValue(source: string, arrayStart: number, arrayEnd: number, index: number): { start: number; end: number } | null {
+  if (!Number.isInteger(index) || index < 0) return null;
+  let pos = skipWhitespace(source, arrayStart + 1);
+  let current = 0;
+  while (pos < arrayEnd && source[pos] !== ']') {
+    const valueStart = pos;
+    const valueEnd = findValueEnd(source, valueStart);
+    if (valueEnd === -1) return null;
+    if (current === index) return { start: valueStart, end: valueEnd };
+    current++;
+    pos = skipWhitespace(source, valueEnd);
+    if (source[pos] === ',') pos = skipWhitespace(source, pos + 1);
+  }
+  return null;
+}
+
+function skipWhitespace(source: string, pos: number): number {
+  while (pos < source.length && /\s/.test(source[pos])) pos++;
+  return pos;
+}
+
+function findValueEnd(source: string, pos: number): number {
+  const ch = source[pos];
+  if (ch === '"') return findStringEnd(source, pos);
+  if (ch === '{' || ch === '[') return findContainerEnd(source, pos);
+  if (ch === '-' || (ch >= '0' && ch <= '9')) return findNumberEnd(source, pos);
+  if (source.startsWith('true', pos)) return pos + 4;
+  if (source.startsWith('false', pos)) return pos + 5;
+  if (source.startsWith('null', pos)) return pos + 4;
+  return -1;
+}
+
+function findStringEnd(source: string, pos: number): number {
+  pos++;
+  while (pos < source.length) {
+    if (source[pos] === '\\') {
+      pos += 2;
+      continue;
+    }
+    if (source[pos] === '"') return pos + 1;
+    pos++;
+  }
+  return -1;
+}
+
+function findContainerEnd(source: string, pos: number): number {
+  const stack = [source[pos]];
+  pos++;
+  while (pos < source.length) {
+    const ch = source[pos];
+    if (ch === '"') {
+      pos = findStringEnd(source, pos);
+      if (pos === -1) return -1;
+      continue;
+    }
+    if (ch === '{' || ch === '[') stack.push(ch);
+    if (ch === '}' || ch === ']') {
+      const open = stack.pop();
+      if ((open !== '{' || ch !== '}') && (open !== '[' || ch !== ']')) return -1;
+      if (stack.length === 0) return pos + 1;
+    }
+    pos++;
+  }
+  return -1;
+}
+
+function findNumberEnd(source: string, pos: number): number {
+  while (pos < source.length && /[-+0-9.eE]/.test(source[pos])) pos++;
+  return pos;
 }
 
 function collapseJsonStrings(expanded: unknown, paths: string[][], originals: Map<string, string>): unknown {
@@ -234,9 +397,9 @@ function collapseJsonStrings(expanded: unknown, paths: string[][], originals: Ma
       const original = originals.get(pathKey);
       // Preserve original formatting when the structure matches.
       if (original && losslessStringify(losslessParse(original)!) === newStr) {
-        setAtPath(clone, p, original);
+        pathSet(clone, p, original);
       } else {
-        setAtPath(clone, p, newStr);
+        pathSet(clone, p, newStr);
       }
     }
   }
@@ -327,21 +490,6 @@ function hasDuplicateKeys(raw: string): boolean {
   return false;
 }
 
-function tryFormatLeft(): void {
-  const raw = getDoc(leftEditor).trim();
-  if (!raw) return;
-  try {
-    if (hasDuplicateKeys(raw)) {
-      updateStatus(leftStatus, 'Duplicate keys detected', 'error');
-      return;
-    }
-    updateStatus(leftStatus, '', '');
-    setDoc(leftEditor, losslessStringify(losslessParse(raw), null, 2)!);
-  } catch {
-    /* not valid JSON yet */
-  }
-}
-
 function syncLeftToRight(): void {
   clearTimeout(rightTimer);
   const raw = getDoc(leftEditor).trim();
@@ -354,15 +502,20 @@ function syncLeftToRight(): void {
   }
   try {
     if (hasDuplicateKeys(raw)) {
+      updateStatus(leftStatus, 'Duplicate keys detected', 'error');
       updateStatus(rightStatus, 'Duplicate keys detected', 'error');
+      return;
     }
     const parsed = losslessParse(raw);
+    assertJsonDocumentRoot(parsed);
     const { expanded, paths, originals } = expandAndTrack(parsed);
     jsonStringPaths = paths;
     jsonStringOriginals = originals;
     setDoc(rightEditor, losslessStringify(expanded, null, 2)!);
+    updateStatus(leftStatus, '', '');
     updateStatus(rightStatus, 'Valid JSON', 'success');
   } catch (err) {
+    updateStatus(leftStatus, (err as Error).message, 'error');
     updateStatus(rightStatus, (err as Error).message, 'error');
   }
 }
@@ -377,8 +530,13 @@ function syncRightToLeft(): void {
   }
   try {
     const parsed = losslessParse(raw);
+    assertJsonDocumentRoot(parsed);
     const collapsed = collapseJsonStrings(parsed, jsonStringPaths, jsonStringOriginals);
-    setDoc(leftEditor, losslessStringify(collapsed, null, 2)!);
+    const leftRaw = getDoc(leftEditor);
+    const currentLeft = losslessParse(leftRaw.trim());
+    const changedPaths = collectChangedPaths(currentLeft, collapsed);
+    const patched = applyChangedPathsToSource(leftRaw, collapsed, changedPaths);
+    setDoc(leftEditor, patched ?? losslessStringify(collapsed)!);
     updateStatus(leftStatus, 'Synced', 'success');
   } catch (err) {
     updateStatus(leftStatus, (err as Error).message, 'error');
@@ -396,7 +554,6 @@ leftEditor = new EditorView({
       editorExtensions,
       EditorView.updateListener.of((update) => {
         if (update.docChanged && !isSync(update)) {
-          tryFormatLeft();
           clearTimeout(leftTimer);
           leftTimer = setTimeout(syncLeftToRight, 200);
         }
